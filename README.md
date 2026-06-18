@@ -1,276 +1,172 @@
-# 📋 Flutter Task Tracker App
+# flutter_task_tracker_app
 
 Aplikasi Flutter untuk manajemen task yang terintegrasi dengan REST API Laravel Task Tracker.
 
 ---
 
-## 📡 API Base URL
+## Setup & Run
 
-```
-http://127.0.0.1:8000/api
-```
-
----
-
-## 🎯 Fitur Aplikasi
-
-| Fitur | Deskripsi |
-|-------|-----------|
-| **Task List Page** | Menampilkan daftar task dari API dengan filter status (Semua/Pending/Done) |
-| **Add Task** | Form tambah task baru dengan validasi lengkap |
-| **Task Detail Page** | Menampilkan detail task lengkap termasuk timestamps |
-| **Update Status** | Toggle status task antara Done dan Pending |
-| **Delete Task** | Hapus task dengan konfirmasi dialog |
-
-### ✨ Bonus Features
-
-| Fitur | Deskripsi |
-|-------|-----------|
-| **Local Caching** | Task list di-cache ke SharedPreferences dengan expiry 5 menit |
-| **Offline Support** | Saat offline/API error, otomatis fallback ke data cache + banner indikator |
-| **Repository Pattern** | Single source of truth — API-first, cache fallback |
-| **Infinite Scroll** | Pagination otomatis saat scroll ke bawah (10 items per page) |
-| **Connectivity Indicator** | Indikator online/offline di AppBar + banner offline |
-| **Reusable Widgets** | `LoadingIndicator`, `ErrorMessage`, `EmptyState`, `OfflineBanner`, `ConnectivityIndicator` |
-| **Unit Tests** | 35 test cases: model serialization, Bloc events/states, widget rendering |
-| **Widget Tests** | `TaskCard`, reusable components, status colors, callbacks |
-
----
-
-## 🏗️ Arsitektur
-
-Aplikasi ini menggunakan arsitektur **3-layer separation + Repository Pattern** dengan **Bloc State Management**:
-
-```
-lib/
-├── core/                          # Shared resources
-│   ├── components/                # Reusable widgets
-│   │   ├── connectivity_widgets.dart  # OfflineBanner, ConnectivityIndicator
-│   │   ├── empty_state.dart           # Tampilan data kosong
-│   │   ├── error_message.dart         # Error + retry button
-│   │   └── loading_indicator.dart     # Loading spinner
-│   ├── constants/
-│   │   ├── colors.dart                # AppColors (primary, pending, done, dll)
-│   │   └── variables.dart             # Base URL
-│   └── services/
-│       └── connectivity_service.dart  # Network detection stream
-│
-├── data/                           # Data Layer
-│   ├── datasources/
-│   │   ├── task_remote_datasource.dart  # HTTP calls (GET/POST/PATCH/PUT/DELETE)
-│   │   └── task_local_datasource.dart   # SharedPreferences caching
-│   ├── models/
-│   │   └── task_model.dart              # Model + Response models
-│   └── repositories/
-│       └── task_repository.dart         # Single source of truth (API→cache fallback)
-│
-├── presentation/                   # Presentation Layer
-│   └── task/
-│       ├── blocs/
-│       │   ├── task_bloc.dart            # Bloc logic (pagination + caching)
-│       │   ├── task_event.dart           # Events (GetTasks, GetNextPage, dll)
-│       │   └── task_state.dart           # States (Initial, Loading, Success, Error)
-│       ├── pages/
-│       │   ├── task_list_page.dart       # List + filter + infinite scroll + offline
-│       │   ├── add_task_page.dart        # Form + validasi
-│       │   └── task_detail_page.dart     # Detail + toggle + hapus
-│       └── widgets/
-│           └── task_card.dart            # Card widget reusable
-│
-└── main.dart                       # Entry point + DI wiring
-```
-
-### 🧠 Alasan Pemilihan Arsitektur
-
-#### 1. Separation of Concerns (3 Layer + Repository)
-
-| Layer | Path | Tanggung Jawab |
-|-------|------|----------------|
-| **`core/`** | Shared constants, reusable widgets, services | Tidak ada business logic, murni utility |
-| **`data/`** | Models, Datasources, Repository | Data fetching, caching, serialization. Repository sebagai facade yang menggabungkan remote + local source |
-| **`presentation/`** | Blocs + Pages + Widgets | UI + State management. Hanya tahu Repository, tidak tahu datasource |
-
-**Kenapa pakai Repository Pattern?**
-- Repository menjadi **single source of truth** — Bloc tidak perlu tahu data dari API atau cache
-- Strategy: API-first, jika gagal → fallback ke local cache
-- Mudah di-test: tinggal mock `TaskRepository`, tidak perlu mock HTTP client
-- Cache invalidation otomatis: setiap write operation (create/update/delete) clear cache, read berikutnya akan fetch fresh data
-
-#### 2. Bloc State Management (dipilih dibanding Provider / Riverpod / GetX)
-
-| Keunggulan Bloc | Penjelasan |
-|-----------------|------------|
-| **Predictable** | State transisi jelas: `Initial → Loading → Success/Error`. Mudah di-debug dengan log otomatis |
-| **Testable** | Bloc murni Dart class tanpa dependency Flutter, bisa di-unit test tanpa widget (terbukti di 35 test cases) |
-| **Event-driven** | UI hanya mengirim Event, Bloc memproses dan mengembalikan State. Separation sempurna |
-| **Scalable** | Setiap fitur punya Bloc-nya sendiri. Tidak ada "god object" |
-| **Mature** | Bloc adalah state management paling populer di Flutter ecosystem |
-
-**Mengapa tidak pakai Provider?** Provider cocok untuk state sederhana, tapi untuk 5+ async operations (GET, POST, PATCH, PUT, DELETE) + pagination + offline, Bloc memberikan kontrol lebih baik.
-
-**Mengapa tidak pakai Riverpod?** Riverpod powerful tapi kompleksitas tinggi. Bloc dengan Event→State pattern lebih eksplisit.
-
-**Mengapa tidak pakai GetX?** GetX mencampur routing, DI, state management dalam satu paket — melanggar separation of concerns.
-
-#### 3. Offline Strategy
-
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│  TaskBloc   │────▶│  Repository  │────▶│  Remote (API)   │
-│  (Event→    │     │  (facade)    │     │  http.get/post   │
-│   State)    │     │              │     └────────┬────────┘
-└─────────────┘     │  try API ───▶│              │ gagal
-                    │  catch ──────▶│  Local (SP)  │
-                    │  cache ◀─────│  SharedPrefs  │
-                    └──────────────┘               │
-                                                   │
-              ConnectivityService ◀────────────────┘
-              (connectivity_plus stream)
-```
-
-#### 4. Pattern Datasource (mengikuti referensi flutter_ayo_piknik)
-
-- Return type `Either<String, T>` dari `dartz` — memisahkan success/error path secara functional
-- Model classes dengan factory `fromJson()` — manual, tanpa code generation untuk mengurangi build complexity
-- HTTP client dengan `http` package — ringan, tidak ada abstraction berlebihan
-
----
-
-## 🚀 Cara Menjalankan
-
-### Prasyarat
-- Flutter SDK 3.9+
-- Laravel Task Tracker API berjalan di `http://127.0.0.1:8000`
-
-### Langkah-langkah
+Pastikan Laravel API sudah berjalan di `http://127.0.0.1:8000`.
 
 ```bash
-# 1. Masuk ke folder project
-cd flutter_task_tracker_app
-
-# 2. Install dependencies
 flutter pub get
-
-# 3. Jalankan static analysis (verifikasi code)
-flutter analyze
-
-# 4. Jalankan unit & widget tests
-flutter test
-
-# 5. Jalankan aplikasi
 flutter run
 ```
 
----
-
-## 📦 Dependencies
-
-| Package | Versi | Kegunaan |
-|---------|-------|----------|
-| `flutter_bloc` | ^9.0.0 | State management (Bloc pattern) |
-| `http` | ^1.2.2 | HTTP client untuk API calls |
-| `dartz` | ^0.10.1 | Functional programming (Either type) |
-| `google_fonts` | ^6.2.1 | Font custom (Inter) |
-| `intl` | ^0.19.0 | Date formatting |
-| `shared_preferences` | ^2.3.5 | Local caching (offline support) |
-| `connectivity_plus` | ^6.1.1 | Network status detection |
-
-### Dev Dependencies
-
-| Package | Versi | Kegunaan |
-|---------|-------|----------|
-| `mocktail` | ^1.0.4 | Mocking untuk unit tests |
-| `flutter_test` | SDK | Widget testing framework |
-
----
-
-## 🧪 Testing (35 Test Cases)
-
-### Struktur Test
-
-```
-test/
-├── unit/
-│   ├── task_model_test.dart      # 10 tests: JSON serialization, helper methods, edge cases
-│   └── task_bloc_test.dart       # 9 tests: setiap Event→State transition
-└── widget/
-    ├── task_card_test.dart       # 8 tests: rendering, callbacks, status colors
-    └── components_test.dart      # 8 tests: LoadingIndicator, ErrorMessage, EmptyState, OfflineBanner, ConnectivityIndicator
-```
-
-### Run Tests
+Untuk menjalankan test terlebih dahulu:
 
 ```bash
-# Semua tests
-flutter test
-
-# Unit tests only
-flutter test test/unit/
-
-# Widget tests only
-flutter test test/widget/
-
-# Specific test file
-flutter test test/unit/task_model_test.dart
-```
-
-### Test Coverage
-
-| Layer | Yang Di-test |
-|-------|-------------|
-| **Model** | `fromJson()`, `toJson()`, `statusLabel`, `shortDescription`, null handling |
-| **Bloc** | `GetTasks` success/error, `GetTaskDetail`, `CreateTask`, `UpdateTaskStatus`, `DeleteTask`, `ResetTaskForm` |
-| **Widget** | `TaskCard` rendering (title, desc, status), callbacks (tap, toggle, delete), color correctness |
-| **Components** | `LoadingIndicator`, `ErrorMessage` + retry, `EmptyState`, `OfflineBanner`, `ConnectivityIndicator` |
-
----
-
-## 🔌 API Endpoints yang Digunakan
-
-| Method | Endpoint | Kegunaan |
-|--------|----------|----------|
-| `GET` | `/api/tasks` | List + pagination (`?page=&per_page=`) |
-| `GET` | `/api/tasks?status=pending` | Filter pending |
-| `GET` | `/api/tasks?status=completed` | Filter completed |
-| `GET` | `/api/tasks/{id}` | Detail task |
-| `POST` | `/api/tasks` | Create task |
-| `PATCH` | `/api/tasks/{id}` | Update status (partial) |
-| `PUT` | `/api/tasks/{id}` | Update full task |
-| `DELETE` | `/api/tasks/{id}` | Delete task |
-
----
-
-## 🔄 Data Flow
-
-```mermaid
-sequenceDiagram
-    participant UI as TaskListPage
-    participant Bloc as TaskBloc
-    participant Repo as TaskRepository
-    participant Remote as RemoteDatasource
-    participant Local as LocalDatasource
-    participant API as Laravel API
-
-    UI->>Bloc: GetTasks(filter)
-    Bloc->>Repo: getTasks(status, page)
-    Repo->>Remote: HTTP GET /api/tasks
-    Remote->>API: Request
-    alt API sukses
-        API-->>Remote: 200 OK + JSON
-        Remote-->>Repo: Right(data)
-        Repo->>Local: cacheTasks(data)
-        Repo-->>Bloc: Right(data)
-        Bloc-->>UI: TasksLoaded(tasks)
-    else API error / offline
-        API-->>Remote: Error
-        Remote-->>Repo: Left(error)
-        Repo->>Local: getCachedTasks()
-        Local-->>Repo: List<TaskModel>?
-        Repo-->>Bloc: Right(cached) or Left(error)
-        Bloc-->>UI: TasksLoaded(tasks, isFromCache: true)
-    end
+flutter test          # 35 test cases
+flutter analyze       # pengecekan kode
 ```
 
 ---
 
-_Dibuat dengan Flutter & BLoC Pattern — mengikuti struktur dari project referensi flutter_ayo_piknik._
+## Fitur
+
+Fitur utama yang diimplementasikan sesuai requirement:
+
+- **Task list** — menampilkan seluruh task dari API, dilengkapi filter status (semua / pending / done)
+- **Tambah task** — form input dengan validasi (judul wajib diisi, minimal 3 karakter, maksimal 255 karakter)
+- **Detail task** — menampilkan informasi lengkap task beserta timestamp pembuatan dan update terakhir
+- **Toggle status** — mengganti status task antara done dan pending, bisa dari halaman list maupun detail
+- **Hapus task** — dilengkapi dialog konfirmasi sebelum eksekusi
+
+Fitur tambahan yang dikembangkan:
+
+- **Cache lokal** — task list disimpan ke SharedPreferences dengan masa berlaku 5 menit, sehingga data tetap tersedia meskipun API sedang bermasalah
+- **Offline support** — saat koneksi terputus, aplikasi otomatis menampilkan data dari cache. Terdapat banner pemberitahuan offline serta indikator status koneksi di AppBar
+- **Infinite scroll** — menerapkan pagination dengan 10 item per halaman. Data halaman berikutnya otomatis dimuat saat pengguna menggulir ke bawah
+- **Repository pattern** — memisahkan sumber data dari Bloc melalui layer repository. Bloc hanya perlu memanggil repository tanpa mengetahui asal data (API atau cache)
+- **Reusable widgets** — komponen seperti loading indicator, error message, empty state, offline banner, dan connectivity indicator dipisahkan ke dalam `core/components/` agar dapat digunakan kembali
+
+---
+
+## Struktur Project
+
+Project ini menggunakan arsitektur 3-layer dengan Repository Pattern dan Bloc sebagai state management. Struktur ini mengacu pada project referensi flutter_ayo_piknik.
+
+```
+lib/
+├── core/
+│   ├── components/       # widget reusable (loading, error, empty, dsb)
+│   ├── constants/        # colors, base URL
+│   └── services/         # connectivity service (stream)
+├── data/
+│   ├── datasources/      # remote (http) + local (SharedPreferences)
+│   ├── models/           # TaskModel + response models
+│   └── repositories/     # TaskRepository (single source of truth)
+├── presentation/
+│   └── task/
+│       ├── blocs/        # event, state, bloc
+│       ├── pages/        # task_list, add_task, task_detail
+│       └── widgets/      # task_card
+└── main.dart
+```
+
+### Penjelasan Arsitektur
+
+Pendekatan yang diambil adalah memisahkan kode ke dalam tiga layer utama agar setiap bagian memiliki tanggung jawab yang jelas:
+
+- **`data/`** — menangani pengambilan dan penyimpanan data, baik dari API maupun cache lokal. Jika terjadi perubahan pada endpoint atau struktur response JSON, perbaikan cukup dilakukan pada layer ini
+- **`presentation/`** — menangani tampilan UI dan state management. Halaman hanya bertugas menampilkan data, sementara logika bisnis diatur oleh Bloc
+- **`core/`** — berisi konstanta, widget yang digunakan di berbagai tempat, dan service yang bersifat umum
+
+Repository berperan sebagai jembatan antara layer data dan presentation. Bloc cukup memanggil `repository.getTasks()` tanpa perlu mengetahui apakah data berasal dari API atau cache. Pola ini juga memudahkan pengujian karena repository dapat di-mock tanpa perlu menyentuh HTTP client.
+
+### Alasan Memilih Bloc
+
+Beberapa pertimbangan dalam memilih Bloc dibandingkan alternatif lain:
+
+- Aplikasi ini memiliki operasi asynchronous yang cukup banyak — GET, POST, PATCH, PUT, DELETE — ditambah pagination dan penanganan offline
+- Provider akan menjadi kurang terkelola ketika state yang ditangani semakin banyak, karena harus membuat banyak ChangeNotifier
+- Bloc memberikan alur yang jelas: event → state. Setiap transisi state dapat dilacak dengan mudah saat debugging
+- Bloc adalah pure Dart class, sehingga dapat diuji secara unit test tanpa Flutter framework (terbukti pada 19 unit test yang berhasil dijalankan)
+
+**Mengapa tidak menggunakan Provider?** Provider lebih cocok untuk state yang sederhana. Untuk aplikasi dengan banyak operasi async dan berbagai state (loading, success, error, empty), Bloc memberikan kontrol yang lebih terstruktur.
+
+**Mengapa tidak menggunakan Riverpod?** Riverpod adalah library yang powerful, namun tingkat kompleksitasnya relatif lebih tinggi. Untuk skala project ini, Bloc dengan pendekatan Event → State sudah memadai dan lebih eksplisit.
+
+**Mengapa tidak menggunakan GetX?** GetX menggabungkan routing, dependency injection, dan state management dalam satu paket, yang menurut saya melanggar prinsip separation of concerns.
+
+### Strategi Penanganan Offline
+
+Penyimpanan lokal menggunakan SharedPreferences karena struktur data yang disimpan relatif sederhana (list task dalam format JSON). Tidak diperlukan database lokal seperti sqflite atau Hive.
+
+Alur penanganan offline:
+
+1. Fetch data dari API terlebih dahulu
+2. Jika berhasil → tampilkan data dan simpan ke cache lokal
+3. Jika gagal → coba ambil data dari cache
+4. Jika cache juga kosong → tampilkan pesan error
+
+Untuk deteksi status koneksi, digunakan package `connectivity_plus` yang menyediakan stream sehingga UI dapat langsung merespons perubahan status (menampilkan atau menyembunyikan banner offline).
+
+---
+
+## Dependencies
+
+```yaml
+dependencies:
+  flutter_bloc: ^9.0.0       # state management
+  http: ^1.2.2                # http client
+  dartz: ^0.10.1              # Either type (success/failure pattern)
+  google_fonts: ^6.2.1        # font Inter
+  intl: ^0.19.0               # date format
+  shared_preferences: ^2.3.5  # local cache
+  connectivity_plus: ^6.1.1   # network detection
+
+dev_dependencies:
+  mocktail: ^1.0.4            # mocking untuk unit test
+  flutter_test: sdk           # widget test
+```
+
+---
+
+## Testing
+
+Total 35 test cases terbagi menjadi:
+
+### Unit test (19)
+- **task_model_test.dart** — pengujian serialization JSON, helper method (`statusLabel`, `shortDescription`), penanganan null values
+- **task_bloc_test.dart** — pengujian seluruh transisi event → state menggunakan MockTaskRepository. Mencakup GetTasks, GetTaskDetail, CreateTask, UpdateTaskStatus, DeleteTask, ResetTaskForm
+
+### Widget test (16)
+- **task_card_test.dart** — pengujian render title, description, status label, warna pending vs done, callback onTap/onToggle/onDelete
+- **components_test.dart** — pengujian LoadingIndicator, ErrorMessage (termasuk tombol retry), EmptyState, OfflineBanner, ConnectivityIndicator
+
+Menjalankan test:
+
+```bash
+flutter test              # seluruh test
+flutter test test/unit/   # unit test saja
+flutter test test/widget/ # widget test saja
+```
+
+---
+
+## API Endpoints
+
+Seluruh request mengarah ke `http://127.0.0.1:8000/api/...`
+
+| Method | Endpoint | Penggunaan |
+|--------|----------|-------------|
+| GET | `/tasks` | List task + pagination |
+| GET | `/tasks?status=pending` | Filter task pending |
+| GET | `/tasks?status=completed` | Filter task completed |
+| GET | `/tasks/{id}` | Detail task |
+| POST | `/tasks` | Membuat task baru |
+| PATCH | `/tasks/{id}` | Update sebagian (status) |
+| PUT | `/tasks/{id}` | Update seluruh data task |
+| DELETE | `/tasks/{id}` | Menghapus task |
+
+Format response API standar: `{ success: bool, message: string, data: ... }`
+
+---
+
+## Catatan Teknis
+
+- Base URL disimpan di `lib/core/constants/variables.dart`. Jika perlu diubah, cukup edit satu file tersebut
+- Durasi cache diatur di `TaskLocalDatasource._cacheExpiry`, default 5 menit
+- Jumlah item per halaman pagination diatur di `TaskBloc._perPage`, default 10
+- Project ini tidak menggunakan code generation (freezed/json_serializable) agar build tetap ringan dan konfigurasi sederhana
